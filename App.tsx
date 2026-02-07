@@ -23,6 +23,7 @@ import { SalesChart } from './components/SalesChart';
 import { Card } from './components/Card';
 import { Modal } from './components/Modal';
 import { generateSalesInsights } from './services/aiService';
+import { supabase } from './services/supabase';
 
 const DEFAULT_GOAL: MonthGoal = {
   id: '',
@@ -78,23 +79,18 @@ const App: React.FC = () => {
     const fetchData = async () => {
       try {
         const [salesRes, goalsRes, callsRes] = await Promise.all([
-          fetch('http://localhost:3002/sales'),
-          fetch('http://localhost:3002/goals'),
-          fetch('http://localhost:3002/calls')
+          supabase.from('sales').select('*').order('date', { ascending: false }),
+          supabase.from('goals').select('*'),
+          supabase.from('calls').select('*').order('date', { ascending: false })
         ]);
 
-        const salesData = await salesRes.json();
-        const goalsData = await goalsRes.json();
-        const callsData = await callsRes.json();
+        if (salesRes.error) throw salesRes.error;
+        if (goalsRes.error) throw goalsRes.error;
+        if (callsRes.error) throw callsRes.error;
 
-        setSales(salesData);
-        if (Array.isArray(goalsData)) {
-          setAllGoals(goalsData);
-        } else if (goalsData && typeof goalsData === 'object') {
-          // Migration fallback if still object
-          setAllGoals([]);
-        }
-        setCalls(callsData);
+        setSales(salesRes.data || []);
+        setAllGoals(goalsRes.data || []);
+        setCalls(callsRes.data || []);
       } catch (error) {
         console.error('Error fetching data:', error);
       }
@@ -160,15 +156,12 @@ const App: React.FC = () => {
   const handleAddCall = async () => {
     const call: Call = {
       id: crypto.randomUUID(),
-      date: new Date().toISOString() // Calls are global or we can filter them by month too. For now global.
+      date: new Date().toISOString()
     };
 
     try {
-      await fetch('http://localhost:3002/calls', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(call)
-      });
+      const { error } = await supabase.from('calls').insert([call]);
+      if (error) throw error;
       setCalls(prev => [call, ...prev]);
     } catch (error) {
       console.error('Error adding call:', error);
@@ -178,9 +171,8 @@ const App: React.FC = () => {
   const handleDeleteCall = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir esta chamada?')) {
       try {
-        await fetch(`http://localhost:3002/calls/${id}`, {
-          method: 'DELETE',
-        });
+        const { error } = await supabase.from('calls').delete().eq('id', id);
+        if (error) throw error;
         setCalls(prev => prev.filter(c => c.id !== id));
       } catch (error) {
         console.error('Error deleting call:', error);
@@ -212,13 +204,8 @@ const App: React.FC = () => {
     };
 
     try {
-      await fetch('http://localhost:3002/sales', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(sale),
-      });
+      const { error } = await supabase.from('sales').insert([sale]);
+      if (error) throw error;
 
       setSales([sale, ...sales]);
       setNewSaleAmount('');
@@ -228,15 +215,15 @@ const App: React.FC = () => {
       setIsAddSaleOpen(false);
     } catch (error) {
       console.error('Error adding sale:', error);
+      alert('Erro ao adicionar venda. Verifique se o banco de dados está configurado.');
     }
   };
 
   const handleDeleteSale = async (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir esta venda?')) {
       try {
-        await fetch(`http://localhost:3002/sales/${id}`, {
-          method: 'DELETE',
-        });
+        const { error } = await supabase.from('sales').delete().eq('id', id);
+        if (error) throw error;
         const newSales = sales.filter(sale => sale.id !== id);
         setSales(newSales);
       } catch (error) {
@@ -250,13 +237,12 @@ const App: React.FC = () => {
     if (!editingSale) return;
 
     try {
-      await fetch(`http://localhost:3002/sales/${editingSale.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(editingSale),
-      });
+      const { error } = await supabase
+        .from('sales')
+        .update(editingSale)
+        .eq('id', editingSale.id);
+
+      if (error) throw error;
 
       setSales(sales.map(s => s.id === editingSale.id ? editingSale : s));
       setIsEditSaleOpen(false);
@@ -269,23 +255,16 @@ const App: React.FC = () => {
   const handleUpdateGoals = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      // Check if goal exists
-      const existing = allGoals.find(g => g.id === currentMonth);
-      const method = existing ? 'PUT' : 'POST';
-      const url = existing
-        ? `http://localhost:3002/goals/${currentMonth}`
-        : 'http://localhost:3002/goals';
-
       const body = { ...tempGoals, id: currentMonth };
 
-      await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
+      // Use upsert for simpler logic
+      const { error } = await supabase
+        .from('goals')
+        .upsert(body, { onConflict: 'id' });
 
+      if (error) throw error;
+
+      const existing = allGoals.find(g => g.id === currentMonth);
       if (existing) {
         setAllGoals(allGoals.map(g => g.id === currentMonth ? body : g));
       } else {

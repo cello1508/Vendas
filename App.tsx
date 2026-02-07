@@ -77,6 +77,7 @@ const App: React.FC = () => {
   // Initial Fetch
   useEffect(() => {
     const fetchData = async () => {
+      console.log('Supabase URL:', import.meta.env.VITE_SUPABASE_URL ? 'Defined' : 'Undefined');
       try {
         const [salesRes, goalsRes, callsRes] = await Promise.all([
           supabase.from('sales').select('*').order('date', { ascending: false }),
@@ -271,8 +272,9 @@ const App: React.FC = () => {
         setAllGoals([...allGoals, body]);
       }
       setIsSettingsOpen(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating goals:', error);
+      alert(`Erro ao salvar meta: ${error.message || 'Erro desconhecido'}`);
     }
   };
 
